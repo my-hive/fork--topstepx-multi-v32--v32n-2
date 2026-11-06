@@ -1,7 +1,8 @@
-"""M2K first-30-minute RTH move reversion, flat 14:00 CT."""
+"""CL large first-30-minute RTH move reversion, flat 14:00 CT."""
+from collections import deque
 import numpy as np
 
-_PV, _TICK, _FEE = 5., .1, .75
+_PV, _TICK, _FEE = 1000., .01, 2.5
 
 
 def _risk(df):
@@ -22,14 +23,17 @@ def signals(panel):
     result = {}
     for symbol, df in panel.items():
         out = np.zeros(len(df), dtype=np.int64)
-        if symbol != 'M2K':
+        if symbol != 'CL':
             result[symbol] = out
             continue
         sec, risk = df.ct_sec.to_numpy(), _risk(df)
-        open_, close = df.open.to_numpy(), df.close.to_numpy()
+        open_, high, low, close = (df[x].to_numpy() for x in ('open', 'high', 'low', 'close'))
         times = df.index.as_unit('ns').asi8
+        history, previous_rth_close = deque(maxlen=20), None
         for indices in df.groupby('session', sort=False).indices.values():
-            opening = np.flatnonzero(sec[indices] == 30600)
+            local_sec = sec[indices]
+            opening = np.flatnonzero(local_sec == 30600)
+            daily_atr = np.mean(history) if len(history) == 20 else np.nan
             active, entered, last = 0, False, None
             for j in indices:
                 if last is not None and times[j] - times[last] != 60_000_000_000:
@@ -40,9 +44,17 @@ def signals(panel):
                     out[j] = active
                 elif not entered and sec[j] == 34140 and len(opening) and risk[j] <= 300:
                     move = close[j] - open_[indices[opening[0]]]
-                    if move:
+                    if np.isfinite(daily_atr) and abs(move) >= .5 * daily_atr and move:
                         out[j] = active = -int(np.sign(move))
                         entered = True
                 last = j
+            rth = (local_sec >= 30600) & (local_sec < 54540)
+            if rth.any():
+                rh = high[indices][rth].max()
+                rl = low[indices][rth].min()
+                rc = close[indices][rth][-1]
+                if previous_rth_close is not None:
+                    history.append(max(rh - rl, abs(rh - previous_rth_close), abs(rl - previous_rth_close)))
+                previous_rth_close = rc
         result[symbol] = out
     return result
