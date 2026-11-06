@@ -1,57 +1,44 @@
-"""Opening-range sweep continuation after 10:00 CT, flat 14:00."""
+"""Post-10:00 CT opening-move reversion in heating oil, flat 14:00."""
 import numpy as np
 
-# point value, tick, estimated commission; selected liquid development sleeves.
-_SPECS = {
-    'MES': (5., .25, .75),
-    'M2K': (5., .1, .75),
-    'MGC': (10., .1, .75),
-    'MCL': (100., .01, .75),
-}
+_PV, _TICK, _FEE = 42000., .0001, 2.5
 
 
-def _risk(df, symbol):
-    pv, tick, fee = _SPECS[symbol]
+def _risk(df):
     close = df.close.to_numpy()
     prev = np.r_[close[0], close[:-1]]
     tr = np.maximum(df.high.to_numpy() - df.low.to_numpy(),
                     np.maximum(abs(df.high.to_numpy() - prev), abs(df.low.to_numpy() - prev)))
     atr = df.assign(_tr=tr).groupby('session', sort=False)._tr.transform(
         lambda x: x.rolling(20, min_periods=20).mean()).to_numpy()
-    # Warmup cannot enter; neutral finite declaration satisfies the risk contract.
-    return np.nan_to_num(1.5 * atr * pv + 4 * tick * pv + 3 * fee, nan=0.)
+    return np.nan_to_num(1.5 * atr * _PV + 4 * _TICK * _PV + 3 * _FEE, nan=0.)
 
 
 def entry_risk(panel):
-    return {s: _risk(df, s) for s, df in panel.items()}
+    return {s: _risk(df) for s, df in panel.items()}
 
 
 def signals(panel):
     result = {}
     for symbol, df in panel.items():
         out = np.zeros(len(df), dtype=np.int64)
-        if symbol not in _SPECS:
+        if symbol != 'HO':
             result[symbol] = out
             continue
-        risk = _risk(df, symbol)
-        high, low, close = (df[x].to_numpy() for x in ('high', 'low', 'close'))
+        risk = _risk(df)
         sec = df.ct_sec.to_numpy()
         for indices in df.groupby('session', sort=False).indices.values():
-            opening = (sec[indices] >= 30600) & (sec[indices] < 36000)
-            if not opening.any():
+            local_sec = sec[indices]
+            opening = np.flatnonzero((local_sec >= 30600) & (local_sec < 36000))
+            entry = np.flatnonzero(local_sec == 36000)
+            exit_ = np.flatnonzero(local_sec == 50400)
+            if not len(opening) or not len(entry) or not len(exit_):
                 continue
-            hi = high[indices][opening].max()
-            lo = low[indices][opening].min()
-            active = 0
-            for j in indices:
-                if sec[j] >= 50400:
-                    active = 0
-                elif active:
-                    out[j] = active
-                elif 36000 <= sec[j] < 48600 and risk[j] <= 300:
-                    side = (-1 if low[j] < lo < close[j] else
-                            1 if high[j] > hi > close[j] else 0)
-                    if side:
-                        out[j] = active = side
+            j, k = entry[0], exit_[0]
+            if j >= k or risk[indices[j]] > 300:
+                continue
+            move = df.close.to_numpy()[indices[j]] - df.open.to_numpy()[indices[opening[0]]]
+            if move:
+                out[indices[j:k]] = -int(np.sign(move))
         result[symbol] = out
     return result
