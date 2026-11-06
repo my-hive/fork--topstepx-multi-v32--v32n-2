@@ -30,19 +30,28 @@ def signals(panel):
         open_ = df.open.to_numpy()
         close = df.close.to_numpy()
         previous_close = None
+        times = df.index.as_unit('ns').asi8
         for indices in df.groupby('session', sort=False).indices.values():
             opening = np.flatnonzero(sec[indices] == 30600)
             active = 0
+            entered = False
+            last = None
             for j in indices:
+                if last is not None and times[j] - times[last] != 60_000_000_000:
+                    active = 0
                 if sec[j] >= 50400:
                     active = 0
-                elif active:
+                elif active and risk[j] <= 300:
                     out[j] = active
-                elif (sec[j] == 36000 and previous_close is not None and len(opening)
-                      and risk[j] <= 300):
+                elif active:
+                    active = 0
+                elif (not entered and sec[j] == 36000 and previous_close is not None
+                      and len(opening) and risk[j] <= 300):
                     gap = open_[indices[opening[0]]] - previous_close
                     if gap:
                         out[j] = active = -int(np.sign(gap))
+                        entered = True
+                last = j
             prior = np.flatnonzero(sec[indices] == 54600)
             if len(prior):
                 previous_close = close[indices[prior[-1]]]
