@@ -1,8 +1,7 @@
-"""RB low-volume first-30-minute move reversion after 10:00 CT."""
-from collections import deque
+"""MYM overnight-gap reversion after 10:00 CT, flat 14:00."""
 import numpy as np
 
-_PV, _TICK, _FEE = 42000., .0001, 2.5
+_PV, _TICK, _FEE = .5, 1., .75
 
 
 def _risk(df):
@@ -23,35 +22,32 @@ def signals(panel):
     result = {}
     for symbol, df in panel.items():
         out = np.zeros(len(df), dtype=np.int64)
-        if symbol != 'RB':
+        if symbol != 'MYM':
             result[symbol] = out
             continue
         sec, risk = df.ct_sec.to_numpy(), _risk(df)
-        open_, close, volume = (df[x].to_numpy() for x in ('open', 'close', 'volume'))
+        open_, close = df.open.to_numpy(), df.close.to_numpy()
         times = df.index.as_unit('ns').asi8
-        history = deque(maxlen=20)
+        previous_close = None
         for indices in df.groupby('session', sort=False).indices.values():
-            local_sec = sec[indices]
-            opening = np.flatnonzero((local_sec >= 30600) & (local_sec < 34200))
-            opening_volume = volume[indices][opening].sum() if len(opening) else np.nan
-            volume_median = np.median(history) if len(history) == 20 else np.nan
+            opening = np.flatnonzero(sec[indices] == 30600)
             active, entered, last = 0, False, None
-            early_move = None
             for j in indices:
-                if sec[j] == 34140 and len(opening):
-                    early_move = close[j] - open_[indices[opening[0]]]
                 if last is not None and times[j] - times[last] != 60_000_000_000:
                     active = 0
                 if sec[j] >= 50400:
                     active = 0
                 elif active:
                     out[j] = active
-                elif not entered and sec[j] == 36000 and early_move and risk[j] <= 300:
-                    if np.isfinite(volume_median) and opening_volume <= volume_median:
-                        out[j] = active = -int(np.sign(early_move))
+                elif (not entered and sec[j] == 36000 and previous_close is not None
+                      and len(opening) and risk[j] <= 300):
+                    gap = open_[indices[opening[0]]] - previous_close
+                    if gap:
+                        out[j] = active = -int(np.sign(gap))
                         entered = True
                 last = j
-            if len(opening):
-                history.append(opening_volume)
+            prior = np.flatnonzero(sec[indices] == 54600)
+            if len(prior):
+                previous_close = close[indices[prior[-1]]]
         result[symbol] = out
     return result
