@@ -44,7 +44,7 @@ def signals(panel):
                     out[j] = active
                 elif not entered and sec[j] == 34140 and len(opening) and risk[j] <= 300:
                     move = close[j] - open_[indices[opening[0]]]
-                    if np.isfinite(daily_atr) and abs(move) >= .5 * daily_atr and move:
+                    if np.isfinite(daily_atr) and abs(move) >= 1.0 * daily_atr and move:
                         out[j] = active = -int(np.sign(move))
                         entered = True
                 last = j
