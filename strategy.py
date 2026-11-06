@@ -1,4 +1,4 @@
-"""RB low-opening-volume RTH move reversion, flat 14:00 CT."""
+"""RB low-volume first-30-minute move reversion after 10:00 CT."""
 from collections import deque
 import numpy as np
 
@@ -36,17 +36,19 @@ def signals(panel):
             opening_volume = volume[indices][opening].sum() if len(opening) else np.nan
             volume_median = np.median(history) if len(history) == 20 else np.nan
             active, entered, last = 0, False, None
+            early_move = None
             for j in indices:
+                if sec[j] == 34140 and len(opening):
+                    early_move = close[j] - open_[indices[opening[0]]]
                 if last is not None and times[j] - times[last] != 60_000_000_000:
                     active = 0
                 if sec[j] >= 50400:
                     active = 0
                 elif active:
                     out[j] = active
-                elif not entered and sec[j] == 34140 and len(opening) and risk[j] <= 300:
-                    move = close[j] - open_[indices[opening[0]]]
-                    if np.isfinite(volume_median) and opening_volume <= volume_median and move:
-                        out[j] = active = -int(np.sign(move))
+                elif not entered and sec[j] == 36000 and early_move and risk[j] <= 300:
+                    if np.isfinite(volume_median) and opening_volume <= volume_median:
+                        out[j] = active = -int(np.sign(early_move))
                         entered = True
                 last = j
             if len(opening):
