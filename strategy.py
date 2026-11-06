@@ -1,4 +1,4 @@
-"""Failed opening-auction break: fade one retake after 10:00 CT, flat 14:00."""
+"""Opening-range sweep continuation after 10:00 CT, flat 14:00."""
 import numpy as np
 
 # point value, tick, estimated commission; selected liquid development sleeves.
@@ -18,7 +18,8 @@ def _risk(df, symbol):
                     np.maximum(abs(df.high.to_numpy() - prev), abs(df.low.to_numpy() - prev)))
     atr = df.assign(_tr=tr).groupby('session', sort=False)._tr.transform(
         lambda x: x.rolling(20, min_periods=20).mean()).to_numpy()
-    return 1.5 * atr * pv + 4 * tick * pv + 3 * fee
+    # Warmup cannot enter; neutral finite declaration satisfies the risk contract.
+    return np.nan_to_num(1.5 * atr * pv + 4 * tick * pv + 3 * fee, nan=0.)
 
 
 def entry_risk(panel):
@@ -48,8 +49,8 @@ def signals(panel):
                 elif active:
                     out[j] = active
                 elif 36000 <= sec[j] < 48600 and risk[j] <= 300:
-                    side = (1 if low[j] < lo < close[j] else
-                            -1 if high[j] > hi > close[j] else 0)
+                    side = (-1 if low[j] < lo < close[j] else
+                            1 if high[j] > hi > close[j] else 0)
                     if side:
                         out[j] = active = side
         result[symbol] = out
