@@ -1,4 +1,4 @@
-"""Post-10:00 CT opening-move reversion in heating oil, flat 14:00."""
+"""RBOB overnight-gap reversion after 10:00 CT, flat 14:00."""
 import numpy as np
 
 _PV, _TICK, _FEE = 42000., .0001, 2.5
@@ -22,23 +22,29 @@ def signals(panel):
     result = {}
     for symbol, df in panel.items():
         out = np.zeros(len(df), dtype=np.int64)
-        if symbol != 'HO':
+        if symbol != 'RB':
             result[symbol] = out
             continue
         risk = _risk(df)
         sec = df.ct_sec.to_numpy()
+        open_ = df.open.to_numpy()
+        close = df.close.to_numpy()
+        previous_close = None
         for indices in df.groupby('session', sort=False).indices.values():
-            local_sec = sec[indices]
-            opening = np.flatnonzero((local_sec >= 30600) & (local_sec < 36000))
-            entry = np.flatnonzero(local_sec == 36000)
-            exit_ = np.flatnonzero(local_sec == 50400)
-            if not len(opening) or not len(entry) or not len(exit_):
-                continue
-            j, k = entry[0], exit_[0]
-            if j >= k or risk[indices[j]] > 300:
-                continue
-            move = df.close.to_numpy()[indices[j]] - df.open.to_numpy()[indices[opening[0]]]
-            if move:
-                out[indices[j:k]] = -int(np.sign(move))
+            opening = np.flatnonzero(sec[indices] == 30600)
+            active = 0
+            for j in indices:
+                if sec[j] >= 50400:
+                    active = 0
+                elif active:
+                    out[j] = active
+                elif (sec[j] == 36000 and previous_close is not None and len(opening)
+                      and risk[j] <= 300):
+                    gap = open_[indices[opening[0]]] - previous_close
+                    if gap:
+                        out[j] = active = -int(np.sign(gap))
+            prior = np.flatnonzero(sec[indices] == 54600)
+            if len(prior):
+                previous_close = close[indices[prior[-1]]]
         result[symbol] = out
     return result
